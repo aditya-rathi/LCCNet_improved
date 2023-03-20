@@ -105,11 +105,8 @@ def train(model, optimizer, scheduler, rgb_img, refl_img, target_transl, target_
 
     transl_err, rot_err = model(rgb_img.cuda(), refl_img.cuda())
 
-
-    if loss == 'points_distance' or loss == 'combined':
-        losses = loss_fn(point_clouds.cuda(), target_transl[:,:,0].type(torch.FloatTensor).cuda(), target_rot.type(torch.FloatTensor).cuda(), transl_err, rot_err)
-    else:
-        losses = loss_fn(target_transl[:,:,0].type(torch.FloatTensor).cuda(), target_rot.type(torch.FloatTensor).cuda(), transl_err, rot_err)
+    losses = loss_fn(point_clouds.cuda(), target_transl[:,:,0].type(torch.FloatTensor).cuda(), target_rot.type(torch.FloatTensor).cuda(), transl_err, rot_err, rgb_img.cuda())
+    
 
     losses['total_loss'].backward()
     optimizer.step()
