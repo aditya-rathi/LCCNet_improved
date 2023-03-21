@@ -15,6 +15,7 @@ import torch.utils.data
 import torch.nn as nn
 
 from losses import DistancePoints3D, GeometricLoss, L1Loss, ProposedLoss, CombinedLoss
+from loss_superglue import SGLoss
 from models.LCCNet import LCCNet
 
 from utils import (mat2xyzrpy, merge_inputs, overlay_imgs, quat2mat,
@@ -25,8 +26,7 @@ from utils import (mat2xyzrpy, merge_inputs, overlay_imgs, quat2mat,
 from LabDataset import LabDataset
 
 
-from sacred import Experiment
-from sacred.utils import apply_backspaces_and_linefeeds
+
 
 
 def get_2D_lidar_projection(pcl, cam_intrinsic):
@@ -76,7 +76,7 @@ _config = {
     'occlusion_threshold': 3.0,
     'network': 'Res_f1',
     'optimizer': 'adam',
-    'weights': './pretrained/kitti_iter1.tar',
+    'weights': None, #'./pretrained/kitti_iter1.tar',
     'rescale_rot': 1.0,
     'rescale_transl': 2.0,
     'resume': True,
@@ -148,7 +148,8 @@ def main(_config):
     elif _config['loss'] == 'L1':
         loss_fn = L1Loss(_config['rescale_transl'], _config['rescale_rot'])
     elif _config['loss'] == 'combined':
-        loss_fn = CombinedLoss(_config['rescale_transl'], _config['rescale_rot'], _config['weight_point_cloud'])
+        # loss_fn = CombinedLoss(_config['rescale_transl'], _config['rescale_rot'], _config['weight_point_cloud'])
+        loss_fn = SGLoss(_config['rescale_transl'], _config['rescale_rot'])
     else:
         raise ValueError("Unknown Loss Function")
 

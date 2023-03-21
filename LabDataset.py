@@ -16,7 +16,7 @@ from utils import (mat2xyzrpy, merge_inputs, overlay_imgs, quat2mat,
 from new_utils import (get_random_pointcloud, get_multiple_random_pointclouds, save_pointcloud, get_random_translation, get_random_orientation)
 
 class LabDataset(Dataset):
-	def __init__(self, root = "./training/", max_r=20.0, max_t=1.5):
+	def __init__(self, root = "./data/", max_r=20.0, max_t=1.5):
 		super(LabDataset, self).__init__()
 	
 		self.max_r = max_r

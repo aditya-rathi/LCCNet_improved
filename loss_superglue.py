@@ -81,7 +81,7 @@ class SGLoss(nn.Module):
             error = (point_cloud_out - point_cloud_gt).norm(dim=0)
             error.clamp(100.)
             point_clouds_loss += error.mean()
-        point_clouds_loss = point_clouds_loss/len(point_clouds)
+        point_clouds_loss = point_clouds_loss/target_transl.shape[0]
 
         superglue_loss = 0.0
         config = {
@@ -100,6 +100,7 @@ class SGLoss(nn.Module):
         for i in range(len(point_clouds)):
             pc = point_clouds[i]
             rgb = images[i]
+            thresh = np.linalg.norm(rgb.shape.numpy(),2)
             R_predicted = quat2mat(rot_err[i])
             T_predicted = tvector2mat(transl_err[i])
             RT_predicted = torch.mm(T_predicted, R_predicted)
@@ -113,14 +114,16 @@ class SGLoss(nn.Module):
             mkpts0 = kpts0[valid]
             mkpts1 = kpts1[matches[valid]]
             mconf = conf[valid]
+            dist = np.linalg.norm(mkpts0,mkpts1,ord=2,axis=1)
+            dist[dist>thresh] = thresh
+            superglue_loss += np.sum(dist)
+        superglue_loss = torch.tensor([superglue_loss/len(point_clouds)]).to(device)
             
-            
-
         #end = time.time()
         #print("3D Distance Time: ", end-start)
-        total_loss = (1 - self.weight_point_cloud) * pose_loss +\
-                     self.weight_point_cloud * (point_clouds_loss/target_transl.shape[0])
+        total_loss = 0.2 * pose_loss + 0.2 * (point_clouds_loss/target_transl.shape[0]) + 0.6 * superglue_loss
         self.loss['total_loss'] = total_loss
         self.loss['transl_loss'] = loss_transl
         self.loss['rot_loss'] = loss_rot
         self.loss['point_clouds_loss'] = point_clouds_loss/target_transl.shape[0]
+        self.loss['superglue_loss'] = superglue_loss
