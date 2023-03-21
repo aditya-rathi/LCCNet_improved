@@ -96,7 +96,7 @@ EPOCH = 1
 
 #model_20_1_5 = os.path.join("finetune", "modelsfinetune_rot_20_trans_1.5.pth")
 
-def train(model, optimizer, scheduler, rgb_img, refl_img, target_transl, target_rot, loss_fn, point_clouds, loss):
+def train(model, optimizer, scheduler, rgb_img, refl_img, rgb_show, target_transl, target_rot, loss_fn, point_clouds, loss):
     model.train()
 
     optimizer.zero_grad()
@@ -105,7 +105,7 @@ def train(model, optimizer, scheduler, rgb_img, refl_img, target_transl, target_
 
     transl_err, rot_err = model(rgb_img.cuda(), refl_img.cuda())
 
-    losses = loss_fn(point_clouds.cuda(), target_transl[:,:,0].type(torch.FloatTensor).cuda(), target_rot.type(torch.FloatTensor).cuda(), transl_err, rot_err, rgb_img.cuda())
+    losses = loss_fn(point_clouds.cuda(), target_transl[:,:,0].type(torch.FloatTensor).cuda(), target_rot.type(torch.FloatTensor).cuda(), transl_err, rot_err, rgb_show.cuda())
     
 
     losses['total_loss'].backward()
@@ -132,7 +132,7 @@ def main(_config):
     # Training and validation set creation
     TrainImgLoader = torch.utils.data.DataLoader(dataset=dataset_class,
                                                 shuffle=True,
-                                                batch_size=10,
+                                                batch_size=5,
                                                 num_workers=5,
                                                 drop_last=False,
                                                 pin_memory=True)
@@ -285,7 +285,7 @@ def main(_config):
             lidar_input = F.interpolate(lidar_input.type(torch.FloatTensor), size=[256, 512], mode="bicubic", align_corners=False)
             end_preprocess = time.time()
             
-            loss, R_predicted,  T_predicted = train(model, optimizer, scheduler, rgb_input, lidar_input,
+            loss, R_predicted,  T_predicted = train(model, optimizer, scheduler, rgb_input, lidar_input, rgb_show,
                                                    sample['tr_error'], sample['rot_error'],
                                                    loss_fn, sample['point_cloud'], _config['loss'])
 

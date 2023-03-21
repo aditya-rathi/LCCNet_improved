@@ -1,5 +1,6 @@
 import torch
 from torch import nn as nn
+from torchvision.transforms import Grayscale, Resize
 from models.matching import Matching
 from models.utils_superglue import (compute_pose_error, compute_epipolar_error,
                           estimate_pose, make_matching_plot,
@@ -22,7 +23,7 @@ def get_2D_lidar_projection(pcl, cam_intrinsic):
 
 def lidar_project_depth(pc_rotated, cam_calib, img_shape):
     pc_rotated = pc_rotated[:, :3].detach().cpu().numpy()
-    cam_intrinsic = cam_calib.numpy()
+    cam_intrinsic = cam_calib
     pcl_uv, pcl_z = get_2D_lidar_projection(pc_rotated, cam_intrinsic)
 
     mask = (pcl_uv[:, 0] > 0) & (pcl_uv[:, 0] < img_shape[1]) & (pcl_uv[:, 1] > 0) & (
@@ -99,8 +100,9 @@ class SGLoss(nn.Module):
         matching = Matching(config).eval().to(device)
         for i in range(len(point_clouds)):
             pc = point_clouds[i]
-            rgb = images[i]
-            thresh = np.linalg.norm(rgb.shape.numpy(),2)
+            rgb = Grayscale()(images[i])
+            rgb = Resize((480,640))(rgb)
+            thresh = np.linalg.norm(rgb.shape,2)
             R_predicted = quat2mat(rot_err[i])
             T_predicted = tvector2mat(transl_err[i])
             RT_predicted = torch.mm(T_predicted, R_predicted)
