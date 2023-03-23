@@ -50,6 +50,19 @@ class SGLoss(nn.Module):
         self.K = np.array([[1.82146e3, 0, 9.44721e2],
 							[0, 1.817312e3, 5.97134e2],
 							[0,0,1]])
+        config = {
+            'superpoint': {
+                'nms_radius': 4,
+                'keypoint_threshold': 0.005,
+                'max_keypoints': 1024
+            },
+            'superglue': {
+                'weights': 'indoor',
+                'sinkhorn_iterations': 20,
+                'match_threshold': 0.05,
+            }
+        }
+        self.matching = Matching(config).eval().to(device)
         self.loss = {}
 
     def forward(self, point_clouds, target_transl, target_rot, transl_err, rot_err, images):
@@ -85,30 +98,23 @@ class SGLoss(nn.Module):
         point_clouds_loss = point_clouds_loss/target_transl.shape[0]
 
         superglue_loss = 0.0
-        config = {
-            'superpoint': {
-                'nms_radius': 4,
-                'keypoint_threshold': 0.005,
-                'max_keypoints': 1024
-            },
-            'superglue': {
-                'weights': 'indoor',
-                'sinkhorn_iterations': 20,
-                'match_threshold': 0.05,
-            }
-        }
-        matching = Matching(config).eval().to(device)
+        
+        
         for i in range(len(point_clouds)):
             pc = point_clouds[i]
             rgb = Grayscale()(images[i])
-            rgb = Resize((480,640))(rgb)
-            thresh = np.linalg.norm(rgb.shape,2)
+            rgb = torch.unsqueeze(rgb,0)
             R_predicted = quat2mat(rot_err[i])
             T_predicted = tvector2mat(transl_err[i])
             RT_predicted = torch.mm(T_predicted, R_predicted)
-            pc = rotate_forward(pc,RT_predicted)
-            depth,_ = lidar_project_depth(pc,self.K,rgb.shape)
-            pred = matching({'image0': rgb, 'image1': depth})
+            # pc = rotate_forward(pc,RT_predicted)
+            depth,_ = lidar_project_depth(pc,self.K,rgb.shape[2:])
+            depth = torch.unsqueeze(depth,0)
+            rgb = Resize((480,640))(rgb)
+            depth = Resize((480,640))(depth)
+            thresh = np.linalg.norm(rgb.shape,2)
+            with torch.no_grad():
+                pred = self.matching({'image0': rgb, 'image1': depth})
             pred = {k: v[0].cpu().numpy() for k, v in pred.items()}
             kpts0, kpts1 = pred['keypoints0'], pred['keypoints1']
             matches, conf = pred['matches0'], pred['matching_scores0']
@@ -116,9 +122,9 @@ class SGLoss(nn.Module):
             mkpts0 = kpts0[valid]
             mkpts1 = kpts1[matches[valid]]
             mconf = conf[valid]
-            dist = np.linalg.norm(mkpts0,mkpts1,ord=2,axis=1)
+            dist = np.linalg.norm(mkpts0-mkpts1,ord=2,axis=1)
             dist[dist>thresh] = thresh
-            superglue_loss += np.sum(dist)
+            superglue_loss += np.mean(dist)
         superglue_loss = torch.tensor([superglue_loss/len(point_clouds)]).to(device)
             
         #end = time.time()
@@ -129,3 +135,5 @@ class SGLoss(nn.Module):
         self.loss['rot_loss'] = loss_rot
         self.loss['point_clouds_loss'] = point_clouds_loss/target_transl.shape[0]
         self.loss['superglue_loss'] = superglue_loss
+
+        return self.loss

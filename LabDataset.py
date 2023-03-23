@@ -74,8 +74,6 @@ class LabDataset(Dataset):
 		pc = np.asarray(pc.points)
 		pc = np.concatenate((pc, np.ones((pc.shape[0], 1))), axis=1)
 		pc = pc.astype(np.float32)
-		RT0 = np.array([[0,-1,0,0], [0,0,-1, -0.435],[1,0,0, -0.324],[0, 0, 0, 1]],dtype=np.float32)
-		pc = (RT0 @ pc.T).T
 		
 		r = get_random_orientation(self.max_r)
 		t = get_random_translation(self.max_t)
