@@ -67,7 +67,7 @@ _config = {
     'checkpoints': './checkpoints/',
     'use_reflectance': False,
     'epochs':100,
-    'BASE_LEARNING_RATE': 3e-2,
+    'BASE_LEARNING_RATE': 1e-5,
     'loss': 'combined',
     'dataset_num': 3, # for ipadDataset
     'max_t': 1.5,
@@ -96,7 +96,7 @@ EPOCH = 1
 
 #model_20_1_5 = os.path.join("finetune", "modelsfinetune_rot_20_trans_1.5.pth")
 
-def train(model, optimizer, scheduler, rgb_img, refl_img, rgb_show, target_transl, target_rot, loss_fn, point_clouds, loss):
+def train(model, optimizer, scheduler, rgb_img, refl_img, gray, real_shape, target_transl, target_rot, loss_fn, point_clouds, loss):
     model.train()
 
     optimizer.zero_grad()
@@ -105,7 +105,8 @@ def train(model, optimizer, scheduler, rgb_img, refl_img, rgb_show, target_trans
 
     transl_err, rot_err = model(rgb_img.cuda(), refl_img.cuda())
 
-    losses = loss_fn(point_clouds.cuda(), target_transl[:,:,0].type(torch.FloatTensor).cuda(), target_rot.type(torch.FloatTensor).cuda(), transl_err, rot_err, rgb_show.cuda())
+
+    losses = loss_fn(point_clouds.cuda(), target_transl[:,:,0].type(torch.FloatTensor).cuda(), target_rot.type(torch.FloatTensor).cuda(), transl_err, rot_err, gray.cuda(), real_shape)
     
 
     losses['total_loss'].backward()
@@ -231,6 +232,7 @@ def main(_config):
             shape_pad_input = []
             real_shape_input = []
             pc_rotated_input = []
+            gray = sample['gray']
 
             # gt pose
             sample['tr_error'] = sample['tr_error'].cuda()
@@ -279,13 +281,12 @@ def main(_config):
 
             lidar_input = torch.stack(lidar_input).cuda()
             rgb_input = torch.stack(rgb_input)
-            rgb_show = rgb_input.clone()
             lidar_show = lidar_input.clone()
             rgb_input = F.interpolate(rgb_input.type(torch.FloatTensor), size=[256, 512], mode="bicubic", align_corners=False)
             lidar_input = F.interpolate(lidar_input.type(torch.FloatTensor), size=[256, 512], mode="bicubic", align_corners=False)
             end_preprocess = time.time()
             
-            loss, R_predicted,  T_predicted = train(model, optimizer, scheduler, rgb_input, lidar_input, rgb_show,
+            loss, R_predicted,  T_predicted = train(model, optimizer, scheduler, rgb_input, lidar_input, gray, real_shape,
                                                    sample['tr_error'], sample['rot_error'],
                                                    loss_fn, sample['point_cloud'], _config['loss'])
 

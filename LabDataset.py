@@ -13,7 +13,10 @@ from utils import (mat2xyzrpy, merge_inputs, overlay_imgs, quat2mat,
                    quaternion_from_matrix, rotate_back, rotate_forward,
                    tvector2mat)
 
+from models.utils_superglue import read_image
+
 from new_utils import (get_random_pointcloud, get_multiple_random_pointclouds, save_pointcloud, get_random_translation, get_random_orientation)
+
 
 class LabDataset(Dataset):
 	def __init__(self, root = "./data/", max_r=20.0, max_t=1.5):
@@ -46,9 +49,10 @@ class LabDataset(Dataset):
 							[0,0,1]])
 		
 		self.transform = transforms.Compose([
-			transforms.ToTensor(),
+			transforms.ToTensor(),	
 			transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                             std=[0.229, 0.224, 0.225])
+                                std=[0.229, 0.224, 0.225])	
+			# transforms.Grayscale()
 		])
 	
 	# def custom_transform(self, rgb, img_rotation=0., flip=False):
@@ -65,9 +69,11 @@ class LabDataset(Dataset):
 	
 	def __getitem__(self, idx):
 		# idx = self.rand_gen.integers(0,len(self.rgb_list))
-		img = cv2.imread(self.rgb_path)
+		img = cv2.imread(self.rgb_path).astype(np.uint8)
 		img = self.transform(img)
 		img_shape = img.shape[1:]
+
+		_,gray,_ = read_image(self.rgb_path,'cpu',[640,480],0,True)
 
 		pc = o3d.io.read_point_cloud(self.lidar_path)
 		pc = pc.voxel_down_sample(voxel_size=7)
@@ -93,7 +99,7 @@ class LabDataset(Dataset):
 		tr_error = T
 		rot_error = quaternion_from_matrix(R)	
 		
-		sample = {'rgb': img, 'K':self.K, 'tr_error': tr_error, 'rot_error': rot_error, 'point_cloud': pc,	'init_pc':init_pc, 'RT':RT}
+		sample = {'rgb': img, 'gray': gray, 'K':self.K, 'tr_error': tr_error, 'rot_error': rot_error, 'point_cloud': pc,	'init_pc':init_pc, 'RT':RT}
 
 		return sample	
 	
