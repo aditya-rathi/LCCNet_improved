@@ -67,16 +67,16 @@ _config = {
     'checkpoints': './checkpoints/',
     'use_reflectance': False,
     'epochs':10,
-    'BASE_LEARNING_RATE': 1e-3,
+    'BASE_LEARNING_RATE': 1e-4,
     'loss': 'combined',
     'dataset_num': 3, # for ipadDataset
-    'max_t': 1.5,
-    'max_r': 20.0,
+    'max_t': 1.0,
+    'max_r': 10.0,
     'occlusion_kernel': 5,
     'occlusion_threshold': 3.0,
     'network': 'Res_f1',
     'optimizer': 'adam',
-    'weights': None, #'./pretrained/kitti_iter1.tar',
+    'weights': None, #'./pretrained/kitti_iter2.tar',
     'rescale_rot': 1.0,
     'rescale_transl': 2.0,
     'resume': True,
@@ -96,7 +96,7 @@ EPOCH = 1
 
 #model_20_1_5 = os.path.join("finetune", "modelsfinetune_rot_20_trans_1.5.pth")
 
-def train(model, optimizer, scheduler, rgb_img, refl_img, gray, real_shape, target_transl, target_rot, loss_fn, point_clouds, loss):
+def train(model, optimizer, scheduler, rgb_img, refl_img, gray, real_shape, target_transl, target_rot, loss_fn, point_clouds, loss, epoch, batch_idx):
     model.train()
 
     optimizer.zero_grad()
@@ -112,7 +112,7 @@ def train(model, optimizer, scheduler, rgb_img, refl_img, gray, real_shape, targ
     losses['total_loss'].backward()
     optimizer.step()
     # scheduler.step(losses['total_loss'])
-    scheduler.step()
+    scheduler.step(epoch+batch_idx/5000)
 
     return losses, rot_err, transl_err
 
@@ -133,7 +133,7 @@ def main(_config):
     # Training and validation set creation
     TrainImgLoader = torch.utils.data.DataLoader(dataset=dataset_class,
                                                 shuffle=True,
-                                                batch_size=5,
+                                                batch_size=7,
                                                 num_workers=5,
                                                 drop_last=False,
                                                 pin_memory=True)
@@ -156,8 +156,8 @@ def main(_config):
 
     # network choice and settings
     if _config['network'].startswith('Res'):
-        feat = 1
-        md = 4
+        feat = 6
+        md = 1
         split = _config['network'].split('_')
         for item in split[1:]:
             if item.startswith('f'):
@@ -197,7 +197,7 @@ def main(_config):
     else:
         optimizer = optim.SGD(parameters, lr=_config['BASE_LEARNING_RATE'], momentum=0.9,
                               weight_decay=2e-6, nesterov=True)
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer,10,1,eta_min=1e-6)
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer,1,1,eta_min=1e-6)
 
     starting_epoch = _config['starting_epoch']
     if _config['weights'] is not None and _config['resume']:
@@ -289,7 +289,7 @@ def main(_config):
             
             loss, R_predicted,  T_predicted = train(model, optimizer, scheduler, rgb_input, lidar_input, gray, real_shape,
                                                    sample['tr_error'], sample['rot_error'],
-                                                   loss_fn, sample['point_cloud'], _config['loss'])
+                                                   loss_fn, sample['point_cloud'], _config['loss'], epoch, batch_idx)
 
             for key in loss.keys():
                 if loss[key].item() != loss[key].item():
@@ -297,12 +297,12 @@ def main(_config):
 
             local_loss += loss['total_loss'].item()
 
-            if batch_idx % 50 == 0 and batch_idx != 0:
+            if batch_idx % 10 == 0 and batch_idx != 0:
 
-                print(f'Iter {batch_idx}/{len(TrainImgLoader)} training loss = {local_loss/50:.3f}, '
+                print(f'Iter {batch_idx}/{len(TrainImgLoader)} training loss = {local_loss/10:.3f}, '
                       f'time = {(time.time() - start_time)/lidar_input.shape[0]:.4f}, '
                       #f'time_preprocess = {(end_preprocess-start_preprocess)/lidar_input.shape[0]:.4f}, '
-                      f'time for 50 iter: {time.time()-time_for_50ep:.4f}')
+                      f'time for 10 iter: {time.time()-time_for_50ep:.4f}')
                 time_for_50ep = time.time()
                 local_loss = 0.
             total_train_loss += loss['total_loss'].item() * len(sample['rgb'])
@@ -313,9 +313,10 @@ def main(_config):
         print('epoch %d total training loss = %.3f' % (epoch, total_train_loss / len(dataset_class)))
         print('Total epoch time = %.2f' % (time.time() - epoch_start_time))
         print("------------------------------------")
+        torch.save(model.state_dict(), model_savepath + f'/finetune_rot_10_trans_1.0_{epoch}.pth')
     print('full training time = %.2f HR' % ((time.time() - start_full_time) / 3600))
 
-    torch.save(model.state_dict(), model_savepath + f'/lab_sensors_finetune_rot_20_trans_1.5_{total_train_loss / len(dataset_class)}.pth') 
+    torch.save(model.state_dict(), model_savepath + f'/lab_sensors_finetune_rot_10_trans_1.0_{total_train_loss / len(dataset_class)}.pth') 
 
 if __name__ == '__main__':
 	main(_config)    

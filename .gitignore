@@ -4,3 +4,5 @@ models/correlation_package/__pycache__/
 __pycache__/
 
 checkpoints/finetune/models/
+
+pretrained/
