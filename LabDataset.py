@@ -65,7 +65,7 @@ class LabDataset(Dataset):
 	
 	def __len__(self):
 		# return len(self.rgb_list)
-		return 10 
+		return 5000 
 	
 	def __getitem__(self, idx):
 		# idx = self.rand_gen.integers(0,len(self.rgb_list))

@@ -66,8 +66,8 @@ torch.backends.cudnn.benchmark = False
 _config = {
     'checkpoints': './checkpoints/',
     'use_reflectance': False,
-    'epochs':100,
-    'BASE_LEARNING_RATE': 1e-5,
+    'epochs':10,
+    'BASE_LEARNING_RATE': 1e-3,
     'loss': 'combined',
     'dataset_num': 3, # for ipadDataset
     'max_t': 1.5,
@@ -75,7 +75,7 @@ _config = {
     'occlusion_kernel': 5,
     'occlusion_threshold': 3.0,
     'network': 'Res_f1',
-    'optimizer': 'sgd',
+    'optimizer': 'adam',
     'weights': None, #'./pretrained/kitti_iter1.tar',
     'rescale_rot': 1.0,
     'rescale_transl': 2.0,
@@ -112,7 +112,7 @@ def train(model, optimizer, scheduler, rgb_img, refl_img, gray, real_shape, targ
     losses['total_loss'].backward()
     optimizer.step()
     # scheduler.step(losses['total_loss'])
-    # scheduler.step()
+    scheduler.step()
 
     return losses, rot_err, transl_err
 
@@ -128,7 +128,6 @@ def main(_config):
     if not os.path.exists(model_savepath):
         os.makedirs(model_savepath)   
 
-    #dataset_class = IPadDataset(num=_config['dataset_num'], max_r=_config['max_r'], max_t=_config['max_t'], with_batch=4000)
     dataset_class = LabDataset(max_r=_config['max_r'], max_t=_config['max_t'])
 
     # Training and validation set creation
@@ -194,7 +193,7 @@ def main(_config):
         optimizer = optim.Adam(parameters, lr=_config['BASE_LEARNING_RATE'], weight_decay=2e-6)
         # Probably this scheduler is not used
         # scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[130], gamma=0.1)
-        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer,'min',factor=0.6)
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer,10,1,eta_min=5e-6)
     else:
         optimizer = optim.SGD(parameters, lr=_config['BASE_LEARNING_RATE'], momentum=0.9,
                               weight_decay=2e-6, nesterov=True)
