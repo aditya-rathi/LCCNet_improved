@@ -65,7 +65,7 @@ class LabDataset(Dataset):
 	
 	def __len__(self):
 		# return len(self.rgb_list)
-		return 500 
+		return 10 
 	
 	def __getitem__(self, idx):
 		# idx = self.rand_gen.integers(0,len(self.rgb_list))
@@ -78,7 +78,16 @@ class LabDataset(Dataset):
 		pc = o3d.io.read_point_cloud(self.lidar_path)
 		pc = pc.voxel_down_sample(voxel_size=7)
 		pc = np.asarray(pc.points)
-		pc = np.concatenate((pc, np.ones((pc.shape[0], 1))), axis=1)
+		pc = np.concatenate((pc, np.ones((pc.shape[0], 1))), axis=1)		
+		pc = pc.T
+
+		RT_INIT = np.array([[1, 0, 0, 0],
+							[0, 1, 0, 50],
+							[0,0,1, 0],
+							[0, 0, 0, 1]])
+		
+		pc = RT_INIT @ pc
+		pc = pc.T
 		pc = pc.astype(np.float32)
 		
 		r = get_random_orientation(self.max_r)

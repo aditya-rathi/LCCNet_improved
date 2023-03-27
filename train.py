@@ -75,7 +75,7 @@ _config = {
     'occlusion_kernel': 5,
     'occlusion_threshold': 3.0,
     'network': 'Res_f1',
-    'optimizer': 'adam',
+    'optimizer': 'sgd',
     'weights': None, #'./pretrained/kitti_iter1.tar',
     'rescale_rot': 1.0,
     'rescale_transl': 2.0,
@@ -111,7 +111,8 @@ def train(model, optimizer, scheduler, rgb_img, refl_img, gray, real_shape, targ
 
     losses['total_loss'].backward()
     optimizer.step()
-    scheduler.step(losses['total_loss'])
+    # scheduler.step(losses['total_loss'])
+    # scheduler.step()
 
     return losses, rot_err, transl_err
 
@@ -197,6 +198,7 @@ def main(_config):
     else:
         optimizer = optim.SGD(parameters, lr=_config['BASE_LEARNING_RATE'], momentum=0.9,
                               weight_decay=2e-6, nesterov=True)
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer,10,1,eta_min=1e-6)
 
     starting_epoch = _config['starting_epoch']
     if _config['weights'] is not None and _config['resume']:

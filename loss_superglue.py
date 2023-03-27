@@ -37,8 +37,8 @@ def lidar_project_depth(pc_rotated, cam_calib, img_shape):
     pcl_z = pcl_z.reshape(-1, 1)
     gridx,gridy = np.meshgrid(range(img_shape[1]),range(img_shape[0]))
     grid_z0 = griddata((pcl_uv[:,1],pcl_uv[:,0]),pcl_z,(gridy,gridx),method='linear',fill_value=np.max(pcl_z))
-    grid_z0 = ((grid_z0/np.max(grid_z0))*255.0).astype(np.uint8)
-    depth_img = torch.from_numpy(grid_z0/255.).float().to(device)
+    grid_z0 = (grid_z0/np.max(grid_z0))
+    depth_img = torch.from_numpy(grid_z0).float().to(device)
     depth_img = depth_img.cuda()
     depth_img = depth_img.permute(2, 0, 1)
 
@@ -80,9 +80,13 @@ class SGLoss(nn.Module):
 
         #start = time.time()
         point_clouds_loss = torch.tensor([0.0]).to(transl_err.device)
+        superglue_loss = 0.0
+
         for i in range(len(point_clouds)):
             point_cloud_gt = point_clouds[i].to(transl_err.device)
             point_cloud_out = point_clouds[i].clone()
+
+            rgb = images[i]
 
             R_target = quat2mat(target_rot[i])
             T_target = tvector2mat(target_transl[i])
@@ -97,28 +101,11 @@ class SGLoss(nn.Module):
             point_cloud_out = rotate_forward(point_cloud_out, RT_total)
 
             error = (point_cloud_out - point_cloud_gt).norm(dim=0)
-            error.clamp(100.)
+            error = error.clamp_max(100.)
             point_clouds_loss += error.mean()
-        point_clouds_loss = point_clouds_loss/target_transl.shape[0]
-
-        superglue_loss = 0.0
         
-        try:
-            for i in range(len(point_clouds)):
-                pc = point_clouds[i]
-                rgb = images[i]
-
-                R_target = quat2mat(target_rot[i])
-                T_target = tvector2mat(target_transl[i])
-                RT_target = torch.mm(T_target, R_target)
-
-                R_predicted = quat2mat(rot_err[i])
-                T_predicted = tvector2mat(transl_err[i])
-                RT_predicted = torch.mm(T_predicted, R_predicted)
-
-                RT_total = torch.mm(RT_target.inverse(), RT_predicted)
-                pc = rotate_forward(pc,RT_total)
-                depth,_ = lidar_project_depth(pc,self.K,real_shape)
+            try:
+                depth,_ = lidar_project_depth(point_cloud_out,self.K,real_shape)
                 depth = torch.unsqueeze(depth,0)
                 
                 depth = Resize((480,640))(depth)
@@ -136,52 +123,54 @@ class SGLoss(nn.Module):
                 dist = dist[dist<=thresh]
                 if len(dist)>0:
                     superglue_loss += np.mean(dist)
-                else: superglue_loss+=100
+                else: superglue_loss+=150
+            except:
+                superglue_loss+=150
 
-                if self.do_viz:
-                # Visualize the matches.
-                    plt.close()
-                    color = cm.jet(mconf)
-                    imgs = [torch.squeeze(rgb).cpu().numpy(), torch.squeeze(depth).cpu().numpy()]
-                    n = 2
-                    size = 6
-                    pad = 0.5
-                    dpi = 100
-                    assert n == 2, 'number of images must be two'
-                    figsize = (size*n, size*3/4) if size is not None else None
-                    fig, ax = plt.subplots(1, n, figsize=figsize, dpi=dpi)
-                    for i in range(n):
-                        ax[i].imshow(imgs[i], cmap=plt.get_cmap('gray'))
-                        ax[i].get_yaxis().set_ticks([])
-                        ax[i].get_xaxis().set_ticks([])
-                        for spine in ax[i].spines.values():  # remove frame
-                            spine.set_visible(False)
-                    plt.tight_layout(pad=pad)
-                    fig.canvas.draw()
+            if self.do_viz:
+            # Visualize the matches.
+                plt.close()
+                color = cm.jet(mconf)
+                imgs = [torch.squeeze(rgb).cpu().numpy(), torch.squeeze(depth).cpu().numpy()]
+                n = 2
+                size = 6
+                pad = 0.5
+                dpi = 100
+                figsize = (size*n, size*3/4) if size is not None else None
+                fig, ax = plt.subplots(1, n, figsize=figsize, dpi=dpi)
+                for i in range(n):
+                    ax[i].imshow(imgs[i], cmap=plt.get_cmap('gray'))
+                    ax[i].get_yaxis().set_ticks([])
+                    ax[i].get_xaxis().set_ticks([])
+                    for spine in ax[i].spines.values():  # remove frame
+                        spine.set_visible(False)
+                plt.tight_layout(pad=pad)
+                fig.canvas.draw()
 
-                    transFigure = fig.transFigure.inverted()
-                    fkpts0 = transFigure.transform(ax[0].transData.transform(mkpts0))
-                    fkpts1 = transFigure.transform(ax[1].transData.transform(mkpts1))
+                transFigure = fig.transFigure.inverted()
+                fkpts0 = transFigure.transform(ax[0].transData.transform(mkpts0))
+                fkpts1 = transFigure.transform(ax[1].transData.transform(mkpts1))
 
-                    fig.lines = [matplotlib.lines.Line2D(
-                        (fkpts0[i, 0], fkpts1[i, 0]), (fkpts0[i, 1], fkpts1[i, 1]), zorder=1,
-                        transform=fig.transFigure, c=color[i], linewidth=1.5)
-                                for i in range(len(mkpts0))]
-                    ax[0].scatter(mkpts0[:, 0], mkpts0[:, 1], c=color, s=2)
-                    ax[1].scatter(mkpts1[:, 0], mkpts1[:, 1], c=color, s=2)
+                fig.lines = [matplotlib.lines.Line2D(
+                    (fkpts0[i, 0], fkpts1[i, 0]), (fkpts0[i, 1], fkpts1[i, 1]), zorder=1,
+                    transform=fig.transFigure, c=color[i], linewidth=1.5)
+                            for i in range(len(mkpts0))]
+                ax[0].scatter(mkpts0[:, 0], mkpts0[:, 1], c=color, s=2)
+                ax[1].scatter(mkpts1[:, 0], mkpts1[:, 1], c=color, s=2)
 
-                    plt.show(block=False)
+                plt.show(block=False)
                     
-            superglue_loss = torch.tensor([superglue_loss/len(point_clouds)]).to(device)
-        except:
-            superglue_loss = torch.tensor([100]).to(device)
+        superglue_loss = torch.tensor([superglue_loss/len(point_clouds)]).to(device)
+        point_clouds_loss = point_clouds_loss/target_transl.shape[0]
+
+        
+        superglue_loss = superglue_loss.clamp(150.)
             
         #end = time.time()
         #print("3D Distance Time: ", end-start)
-        if superglue_loss[0] == 100:
-            total_loss = 0.8 * pose_loss + 0.1 * (point_clouds_loss/target_transl.shape[0]) + 0.1 * superglue_loss
-        else:
-            total_loss = 0.2 * pose_loss + 0.2 * (point_clouds_loss/target_transl.shape[0]) + 0.6 * superglue_loss
+        
+        total_loss = 0.25 * pose_loss + 0.05 * (point_clouds_loss/target_transl.shape[0]) + 0.7 * superglue_loss
+
         self.loss['total_loss'] = total_loss
         self.loss['transl_loss'] = loss_transl
         self.loss['rot_loss'] = loss_rot
