@@ -10,6 +10,8 @@ import matplotlib.cm as cm
 import matplotlib.pyplot as plt
 import matplotlib
 from scipy.interpolate import griddata
+import threading
+from multiprocessing import pool,Pool
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
@@ -65,9 +67,54 @@ class SGLoss(nn.Module):
                 'match_threshold': 0.05,
             }
         }
-        self.matching = Matching(config).eval().to(device)
+        self.matching = []
+        self.locks:list[threading.Lock] = []
+        self.n = 2
+        for i in range(self.n):
+            self.matching.append(Matching(config).eval().to(device))
+            self.locks.append(threading.Lock())
+        # self.matching1 = Matching(config).eval().to(device)
+        # self.matching2 = Matching(config).eval().to(device)
         self.loss = {}
         self.do_viz = do_viz
+        self.sg_loss = 0.0
+
+    def matcher(self, pc, rgb, real_shape):
+        try:
+            depth,_ = lidar_project_depth(pc,self.K,real_shape)
+            depth = torch.unsqueeze(depth,0)
+            
+            depth = Resize((480,640))(depth)
+            thresh = 150
+            n = len(self.matching)
+            i = 0
+            while True:
+                if self.locks[i].locked(): i+=1
+                else:
+                    self.locks[i].acquire()
+                    with torch.no_grad():
+                        pred = self.matching[i]({'image0': rgb, 'image1': depth})
+                    self.locks[i].release()
+                    break
+                if i==n: i = 0
+            pred = {k: v[0].cpu().numpy() for k, v in pred.items()}
+            kpts0, kpts1 = pred['keypoints0'], pred['keypoints1']
+            matches, conf = pred['matches0'], pred['matching_scores0']
+            valid = matches > -1
+            mkpts0 = kpts0[valid]
+            mkpts1 = kpts1[matches[valid]]
+            mconf = conf[valid]
+            dist = np.linalg.norm(mkpts0-mkpts1,ord=2,axis=1)
+            dist = dist[dist<=thresh]
+            if len(dist)>0:
+                superglue_loss = np.mean(dist)
+            else: superglue_loss=150
+        except:
+            superglue_loss=150
+        return superglue_loss
+    
+    def add_loss(self,obj:pool.AsyncResult):
+        self.sg_loss += obj.get()
 
     def forward(self, point_clouds, target_transl, target_rot, transl_err, rot_err, images, real_shape):
         loss_transl = 0.
@@ -80,7 +127,8 @@ class SGLoss(nn.Module):
 
         #start = time.time()
         point_clouds_loss = torch.tensor([0.0]).to(transl_err.device)
-        superglue_loss = 0.0
+        self.sg_loss = 0.0
+        mypool = Pool(processes=self.n)
 
         for i in range(len(point_clouds)):
             point_cloud_gt = point_clouds[i].to(transl_err.device)
@@ -103,64 +151,69 @@ class SGLoss(nn.Module):
             error = (point_cloud_out - point_cloud_gt).norm(dim=0)
             error = error.clamp_max(100.)
             point_clouds_loss += error.mean()
+
+            
+            mypool.apply_async(self.matcher,(point_cloud_out,rgb,real_shape),callback=self.add_loss)
         
-            try:
-                depth,_ = lidar_project_depth(point_cloud_out,self.K,real_shape)
-                depth = torch.unsqueeze(depth,0)
+            # try:
+            #     depth,_ = lidar_project_depth(point_cloud_out,self.K,real_shape)
+            #     depth = torch.unsqueeze(depth,0)
                 
-                depth = Resize((480,640))(depth)
-                thresh = 150
-                with torch.no_grad():
-                    pred = self.matching({'image0': rgb, 'image1': depth})
-                pred = {k: v[0].cpu().numpy() for k, v in pred.items()}
-                kpts0, kpts1 = pred['keypoints0'], pred['keypoints1']
-                matches, conf = pred['matches0'], pred['matching_scores0']
-                valid = matches > -1
-                mkpts0 = kpts0[valid]
-                mkpts1 = kpts1[matches[valid]]
-                mconf = conf[valid]
-                dist = np.linalg.norm(mkpts0-mkpts1,ord=2,axis=1)
-                dist = dist[dist<=thresh]
-                if len(dist)>0:
-                    superglue_loss += np.mean(dist)
-                else: superglue_loss+=150
-            except:
-                superglue_loss+=150
+            #     depth = Resize((480,640))(depth)
+            #     thresh = 150
+            #     with torch.no_grad():
+            #         pred = self.matching({'image0': rgb, 'image1': depth})
+            #     pred = {k: v[0].cpu().numpy() for k, v in pred.items()}
+            #     kpts0, kpts1 = pred['keypoints0'], pred['keypoints1']
+            #     matches, conf = pred['matches0'], pred['matching_scores0']
+            #     valid = matches > -1
+            #     mkpts0 = kpts0[valid]
+            #     mkpts1 = kpts1[matches[valid]]
+            #     mconf = conf[valid]
+            #     dist = np.linalg.norm(mkpts0-mkpts1,ord=2,axis=1)
+            #     dist = dist[dist<=thresh]
+            #     if len(dist)>0:
+            #         superglue_loss += np.mean(dist)
+            #     else: superglue_loss+=150
+            # except:
+            #     superglue_loss+=150
 
-            if self.do_viz:
-            # Visualize the matches.
-                plt.close()
-                color = cm.jet(mconf)
-                imgs = [torch.squeeze(rgb).cpu().numpy(), torch.squeeze(depth).cpu().numpy()]
-                n = 2
-                size = 6
-                pad = 0.5
-                dpi = 100
-                figsize = (size*n, size*3/4) if size is not None else None
-                fig, ax = plt.subplots(1, n, figsize=figsize, dpi=dpi)
-                for i in range(n):
-                    ax[i].imshow(imgs[i], cmap=plt.get_cmap('gray'))
-                    ax[i].get_yaxis().set_ticks([])
-                    ax[i].get_xaxis().set_ticks([])
-                    for spine in ax[i].spines.values():  # remove frame
-                        spine.set_visible(False)
-                plt.tight_layout(pad=pad)
-                fig.canvas.draw()
+            # if self.do_viz:
+            # # Visualize the matches.
+            #     plt.close()
+            #     color = cm.jet(mconf)
+            #     imgs = [torch.squeeze(rgb).cpu().numpy(), torch.squeeze(depth).cpu().numpy()]
+            #     n = 2
+            #     size = 6
+            #     pad = 0.5
+            #     dpi = 100
+            #     figsize = (size*n, size*3/4) if size is not None else None
+            #     fig, ax = plt.subplots(1, n, figsize=figsize, dpi=dpi)
+            #     for i in range(n):
+            #         ax[i].imshow(imgs[i], cmap=plt.get_cmap('gray'))
+            #         ax[i].get_yaxis().set_ticks([])
+            #         ax[i].get_xaxis().set_ticks([])
+            #         for spine in ax[i].spines.values():  # remove frame
+            #             spine.set_visible(False)
+            #     plt.tight_layout(pad=pad)
+            #     fig.canvas.draw()
 
-                transFigure = fig.transFigure.inverted()
-                fkpts0 = transFigure.transform(ax[0].transData.transform(mkpts0))
-                fkpts1 = transFigure.transform(ax[1].transData.transform(mkpts1))
+            #     transFigure = fig.transFigure.inverted()
+            #     fkpts0 = transFigure.transform(ax[0].transData.transform(mkpts0))
+            #     fkpts1 = transFigure.transform(ax[1].transData.transform(mkpts1))
 
-                fig.lines = [matplotlib.lines.Line2D(
-                    (fkpts0[i, 0], fkpts1[i, 0]), (fkpts0[i, 1], fkpts1[i, 1]), zorder=1,
-                    transform=fig.transFigure, c=color[i], linewidth=1.5)
-                            for i in range(len(mkpts0))]
-                ax[0].scatter(mkpts0[:, 0], mkpts0[:, 1], c=color, s=2)
-                ax[1].scatter(mkpts1[:, 0], mkpts1[:, 1], c=color, s=2)
+            #     fig.lines = [matplotlib.lines.Line2D(
+            #         (fkpts0[i, 0], fkpts1[i, 0]), (fkpts0[i, 1], fkpts1[i, 1]), zorder=1,
+            #         transform=fig.transFigure, c=color[i], linewidth=1.5)
+            #                 for i in range(len(mkpts0))]
+            #     ax[0].scatter(mkpts0[:, 0], mkpts0[:, 1], c=color, s=2)
+            #     ax[1].scatter(mkpts1[:, 0], mkpts1[:, 1], c=color, s=2)
 
-                plt.show(block=False)
+            #     plt.show(block=False)
+        mypool.close()
+        mypool.join()
                     
-        superglue_loss = torch.tensor([superglue_loss/len(point_clouds)]).to(device)
+        superglue_loss = torch.tensor([self.sg_loss/len(point_clouds)]).to(device)
         point_clouds_loss = point_clouds_loss/target_transl.shape[0]
 
         

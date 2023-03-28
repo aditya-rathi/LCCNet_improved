@@ -76,7 +76,7 @@ _config = {
     'occlusion_threshold': 3.0,
     'network': 'Res_f1',
     'optimizer': 'adam',
-    'weights': None, #'./pretrained/kitti_iter2.tar',
+    'weights': './pretrained/kitti_iter2.tar',
     'rescale_rot': 1.0,
     'rescale_transl': 2.0,
     'resume': True,
@@ -133,7 +133,7 @@ def main(_config):
     # Training and validation set creation
     TrainImgLoader = torch.utils.data.DataLoader(dataset=dataset_class,
                                                 shuffle=True,
-                                                batch_size=7,
+                                                batch_size=3,
                                                 num_workers=5,
                                                 drop_last=False,
                                                 pin_memory=True)
@@ -157,7 +157,7 @@ def main(_config):
     # network choice and settings
     if _config['network'].startswith('Res'):
         feat = 6
-        md = 1
+        md = 4
         split = _config['network'].split('_')
         for item in split[1:]:
             if item.startswith('f'):
